@@ -1,0 +1,70 @@
+\documentclass[12pt,a4paper]{report}
+\usepackage{color}
+
+
+\title{R:Incremental entitiy resolution on rules and data}
+\begin{document}
+\maketitle
+
+\section*{1 Introduction}
+This paper invesitgates how to enhance the performance of Entity Resolution on effience, but not on accuracy or recaLl. Specifically, it first address the problem of keeping the ER result up-to-date when the ER logic or data ``evolve'' frequently. It says the naive approach for ER is to re-run ER from scractch, which is not tolerable for large datasets. The author's main idea is some like to use Greedy Algorithm and ``Divide and Conquer'' strategy for saving redundant work of evolution by exploiting previous \textcolor{red}{\emph{``materialized``}} ER results.
+
+The paper focuses on two types of evolution: (1)Rule Evolution (2)Data Evolution. For (1), the solution given is to \emph{``materialize''} the previous results. When rule $B_{1}$ is improved yielding rule $B_{2}$, the preivous results based on $B_{1}$ could be used directly to help computing the new ER result obeying rule $B_{2}$. To illustrate, consider this case: let $B_{1}=p_{name}$, say that two records match if predicate $p_{name}$ evaluates to true, and $B_{2}=p_{name}\wedge p_{zip}$, which is stricter than $B_{1}$. When the algorithm calls on $B_{1}$ to compare records in set $S$, say, $\{\{r_{1}\}, \{r_{2}\}, \{r_{3}\}, \{r_{4}\}\}$, we get the result $\{\{r_{1},r_{2},r_{3}\}, \{r_{4}\}\}$. Because the evolved rule $B_{2}$ is stricter than ${B_{1}}$, the second ER based on the new rule can be computed directly from the previous result rather than the initial set $S$. Specifically, we can just run $B=p_{zip}$ on $\{\{r_{1},r_{2},r_{3}\}, \{r_{4}\}\}$ to reach the final result. From this case, it's obvious to see that materializing the previous result can help to simplify the new complicated rule and bring in cost savings from the intermediate results. \textcolor{red}{But if the evolved rule is not quite stricter than the old rule, the process becomes more challenging. When is materialization feasible? Which scenarios can it pay off? Under what conditions and for what strategies are the savings over the naive approach significant?} Above problems are the important part of this paper. Compared to (1), the problem (2) is rather trivial. We can just resolve the new incoming data and old data sparately, and utilize a little skill on the combination step. What's more, generally, the new data is always extremely small than the old data, so its overhead is not able to influence the system too much.
+
+\section*{2 Model and properties}
+The paper considers three ER models: match-based clustering, distance-based clustering and pairs ER. The author mainly focuses on the match-based clustering model, using a Boolean comparison rule for resolving records. Because he shows that there are not much changes for the properties among these three models. 
+\subsection*{2.1 Match-based clustering model}
+Define a Boolean comparison rule $B$ as a function that takes two records and returns \texttt{TRUE} or \texttt{FALSE}. Assume that $B$ is commutative, i.e., $\forall r_{i}, r_{j}, B(r_{i}, r_{j})=B(r_{j}, r_{i})$. An ER algorithm receives as inputs a partition $P_{i}$ of $S$ and a Boolean comparison rule $B$ and returns another partition $P_{o}$ of $S$. A partition $P=\{c_{1},...,c_{m}\}$ such that $c_{1}\cup ...\cup c_{m}=S$ and $\forall c_{i},c_{j} \in P$ where $i \neq j, c_{i} \cap c_{j}=\emptyset$. For example, when $P_{i}=\{\{r_{1},r_{2},r_{3}\}, \{r_{4}\}\}$, the output using the the rule $B=p_{name}\wedge p_{zip}$ is the partition $P_{o}=\{\{r_{1},r_{2},r_{3}\}, \{r_{4}\}\}$. However, we should notice three places in this model. First, not all the ER algorithm simply cluster records based on $B$. Second, input clusters are allowed to be un-merged as long as the final ER result is stll a partition of the records in $S$. Un-merging means incorrect clustering occurs. Third, the ER algorithm is \textcolor{red}{\emph{nondeterministic}}. A hierarchical clustering algorithm based on Bollean rules may produce different partitions depending on which records are compared first. Formally, denote an ER result $E(P_{i},B)$ produced by input partition $p_{i}$ and rule $B$. Denote all the possible paritions that can be produced by the ER algorithm $E$ as $\bar{E}(P_{i},B)$. For example, given $P_{i}= \{\{r_{1}\}, \{r_{2}\}, \{r_{3}\}, \{r_{4}\}\}$, $\bar{E}(P_{i},B)$ could be $\{\{\{r_{1},r_{2},r_{3}\}, \{r_{4}\}\},\{\{r_{1},r_{2}\},\{r_{3},r_{4}\}\}\}$ while $E(P_{i},B)=\{\{r_{1},r_{2},r_{3}\}, \{r_{4}\}\}$. Another important concept is strictness. A Boolean comparison rule $B_{1}$ is \emph{stricter than} rule ${B_{2}}$(denoted as $B_{1}\leq B_{2}$) if $\forall r_{i}, r_{j}, B_{1}(r_{i}, r_{j})=$\texttt{TRUE} implies $B_{2}(r_{i},r_{j})=$\texttt{TRUE}. 
+
+How does the rule generate? Though this part is significant, the author's answer is \textcolor{red}{\emph{unconvincing}}. He says, Machine Learning, probabilistic modeling, and graph-based approaches can be used to develop and refine rules. If ML is used to determine what features and thresholds to use for deciding if records match, there will be no evolution on the rule. Unless new data added into training sets, the rule learned by ML will not change. Because the rule is learned from a fixed training data set. Thus, problem(1) is redundant. What's more, the cost of learning a rule plus computing a result is definitely larger than learning a result directly. The only advantage of the author's method is that it can proceed newly small added small data in real time. 
+
+\subsection*{2.2 Properties}
+This part is the most important of the paper. It introduces two new properties for ER algorithms - \emph{rule monotonic} and \emph{context free} and two existing properties - \emph{general incremental} and \emph{order independent}.
+\subsubsection*{2.2.1 Rule monotonic}
+First, define the notion of refinement between partitions. A partition $P_{1}$ of a set $S$ \emph{refines} another partition $P_{2}$ of $S$(denoted as $P_{1} \leq P_{2}$) if $\forall c_{1} \in P_{1}, \exists c_{2} \in P_{2}$ s.t. $c_{1}\subseteq c_{2}$. Now define the rule monotonic property, which says that the stricter the comparison rule, the more refined the ER result. For example, suppose that $P=\{\{r_{1}\}, \{r_{2}\}, \{r_{3}\}, \{r_{4}\}\}, B_{1}\leq B_{2}$, and $E(P_{i},B_{1})=\{\{r_{1},r_{2},r_{3}\}, \{r_{4}\}\}$. If the ER algorithm is $\mathcal{RM}$, $E(P_{i},B_{2})$ can only return $\{\{r_{1},r_{2},r_{3}\}, \{r_{4}\}\}$ or $\{\{r_{1},r_{2},r_{3},r_{4}\}\}$.
+\subsubsection*{2.2.2 Context free}
+This property says that a subset of $P_{i}$ can be processed ``in isolation'' from the rest of the cluster. For clarification, just imagine that in a set of animals, the cluster of birds will no longer have an intersaction with the cluster of dogs. With such knowledge, we can separately resolve the mutual independent subsets. The key of this property is that it requires the experts have the related pri-knowledge. Formally, with knowledge that no clusters in $P=\{\{r_{1}\}, \{r_{2}\}\}$ will merge with any of the clusters in $P_{i}-P=\{\{r_{3}\},\{r_{4}\}\}$ and for any $P_{o}\in \bar{E}(P_{i},B), P_{o}\leq \{\{r_{1},r_{2}\},\{r_{3}, r_{4}\}\}$, we say the ER algorithm is $\mathcal{CF}$ for such $P_{i}, P$ and $B$. In this case, the algorithm can resolve $P$ independently from $P_{i}-P$, and there exists an ER result of $P_{i}$ that is the same as the union of the ER resuls of $P$ and $P_{i}-P$.
+\subsubsection*{2.2.3 General incremental(more natural)}
+This property is similar to the $\mathcal{CF}$, but looser than that. The main difference is that the $\mathcal{CF}$ requires the subsets to be independent, but the $\mathcal{GI}$ does not.The $GI$ says that we can resolve $P$ fisrt. Then we can add the result of $E(P,B)$ to the remaining clusters and resolve all the clusters together. The its idea to save costs is just like 
+Merge Sort. 
+\subsubsection*{2.2.4 Order independent}
+This properties says that an ER algorithm is $\mathcal{OI}$ if the ER result is same regardless of the order of the records processed. In other words, the ER algorithm is \textcolor{red}{\emph{deterministic}}. $\bar{E}(P_{i}, B)$ contains exactly one partition of $S$.
+
+\section*{3 Rule evolution}
+\subsection*{3.1 Materialization}
+Though when and how to materialize earilier results is a big problem, the author's answer doesn't make sense. He assumes that all rules are in conjunctive normal form, like $B=p_{1}\wedge p_{2}\wedge (p_{3}\vee p_{4})$. \textcolor{red}{Certainly, if we know how the rules generate and evolve, the most useful conjuncts become easier to find for materializing.} In the last section, he said ML could be used to determine the rules, while in this section he used the most naive method, materializing all conjuncts of B, instead of technical approachs. Though he could amortize the common costs in a concurrent fashion, it is still not persuasive. 
+\subsection*{3.2 Rule evolution technique}
+First, the author introduces a new definition \emph{meet}. The \emph{meet} of $P_{1}$ and $P_{2}$(denoted as $P_{1}\wedge P_{2}$) returns a new partition of $S$ whose members are the non-empty intersections of the clusters of $P_{1}$ with those of $P_{2}$. 
+\subsubsection*{3.2.1 ER algorithm satisfying $\mathcal{RM}$ and $\mathcal{CF}$}
+Suppose that $B_{1}=P_{1}\wedge P_{2}\wedge P_{3}$ and $B_{2}=P_{1}\wedge P_{2}\wedge P_{4}$. When $B_{1}$ evolves into $B_{2}$, we first materialize the common conjuncts of $B_{1}$ and $B_{2}- ``p_{1} \wedge p_{2}$''. The reason to materilize the common conjuncts is to utilize the property $\mathcal{RM}$. Because $B_{2}$ is stricter than any conjuncts of itself and basde on $\mathcal{RM}$, $E(P_{i}, B_{2})$ could be directly computed from the previous result $E(P_{i}, ``p_{1} \wedge p_{2}")$. Then exploiting the property $\mathcal{CF}$, we can resolve each cluster of the result $E(P_{i},``p_{1} \wedge p_{2}")$ independently using the rule $B_{2}$(\textcolor{blue}{the reason not to use $``p_{4}"$ is unknown. Maybe depend on the algorithm}). According to $\mathcal{RM}$ and $\mathcal{CF}$, while the complexity of the algorithm is not improved, lots of redundant work are saved by running ER on small clusters of the previous materialized results. 
+\subsubsection*{3.2.2 ER algorithm satisfying $\mathcal{RM}$ only}
+Without $\mathcal{CF}$, the subsets of $P_{i}$ can not be processed independently. \textcolor{blue}{It doesn't mean that We must treat the materialized previous result as an entire set to handle.} It implies when processing one subset we must put its relatedly dependent subset into consideration. Suppose we have an intermediate subsets $\{r_{1}, r_{3}, r_{5}\}, \{r_{2}\}$ and $\{r_{4}\}$. $B_{2}(r_{1},r_{3})=$\texttt{FLASE},  $B_{2}(r_{3},r_{5})=$\texttt{FLASE} and $B_{2}(r_{1},r_{5})=$\texttt{TRUE}. But the algorithm rules that only the records within a sliding window of size 3 on the sorted list of records can be compared($r_{1},r_{5}$ only match during the transitive closure). Thus, when computing $\{r_{1}, r_{3}, r_{5}\}$, we must take $\{r_{2}\}$ and $\{r_{4}\}$ into account. With  $\{r_{2}\}$ and $\{r_{4}\}$, the distance between $\{r_{1}\}$ and $\{r_{5}\}$ becomes \textcolor{red}{4} but not \textcolor{red}{2}. Thus, $r_{1}, r_{5}$ will not be clustered in the final result even though  $B_{2}(r_{1},r_{5})=$\texttt{TRUE}.
+\subsubsection*{3.2.3 ER algorithm satisfying $\mathcal{GI}$}
+Though no longer satisfying $\mathcal{RM}$ and $\mathcal{CF}$, the algorithm is still able to make use of the materializations of the common conjuncts. But this time, we must treat the materialized previous result as an entire set to handle. It is still efficient for the same reason of Merge Sort.
+\subsection*{3.3 Materialization strategies}
+This section also makes nonsense. If a group of conjuncts appears together frequently in most rules, they should be materialized; If the rules are looser than other rules, they should be materialized.
+
+\section*{4 Data Evolution}
+The method to handle the newly incoming data is similar to Rule Evolution. We can just treat the new dat as a subset of $P_{i}$. Then the algorithm and startegies in the last section can all be applied.
+
+\section*{5 Variations}
+This section shows that the properties and evolution algorithm mentioned in previous sections can carry over to Distance-based evolution and Pairs ER evolution. The only tricky place is in the Distance-based model part. Denote $D$ as a commutative distance function that returns a non-negative distance between two records and $d$ as a distance between two records on a specific attribute. Suppose $D_{1}=d_{1}+d_{2}$ and  $D_{2}=d_{1}+d_{3}$, how to express the ``common conjuncts'' between $D_{1}$ and $D_{2}$? Restrict $d_{2}$ and $d_{3}$ distances to be at most $f$. When evolve from $D_{1}$ into $D_{2}$, define a third distance comparison rule $D_{3}(r,s)=[max\{(D_{1}(r,s).min-f),0\}, D_{1}(r,s).max+f]$. As a result, $D_{3}$ acts as the ``common conjuncts''.
+
+\section*{6 ER algorithms and their properties}
+This section summarizes some important algorithms and their properties, including the sorted neighborhood algorithm(\textbf{$SN$}), Hierarchical clustering based on a Boolean comparison(\textbf{$HC_{BR}$}), Monge-Elkan(\textbf{$ME$}), and the complete-link hierarchical clustering algorithm(\textbf{$HC_{DC}$}).
+
+\section*{7 Experimental evaluation}
+The author evaluates the performance of his algorithm on three metrics: CPU, IO, and storage costs. As his techniques do not change the ER result, he does not consider accuracy. And also there is not a recall problem. Because the result is always a partition of $S$ with fixed size. Ml is not used in the experiment as the author said in previous sections.
+
+ \section*{8 Papers worth reading}
+Blocking: [25]
+
+\noindent Matched based clustering: [3,16]
+
+\noindent Distance-based clustering: [4,21]
+
+\noindent Pairs ER: [2,26,31] (active learning)
+
+\noindent Orthers: [7,10]
+
+\end{document}
